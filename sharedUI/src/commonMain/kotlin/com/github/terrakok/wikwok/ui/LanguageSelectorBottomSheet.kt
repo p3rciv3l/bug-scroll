@@ -38,11 +38,8 @@ fun LanguageSelectorBottomSheet(
     onDismiss: () -> Unit
 ) {
     if (isVisible) {
-        val sheetState = rememberModalBottomSheetState()
-
         ModalBottomSheet(
             onDismissRequest = onDismiss,
-            sheetState = sheetState,
             shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
             dragHandle = { BottomSheetDefaults.DragHandle() }
         ) {

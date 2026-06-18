@@ -7,11 +7,11 @@ plugins {
 
 android {
     namespace = "com.github.terrakok.wikwok.androidApp"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         minSdk = 23
-        targetSdk = 36
+        targetSdk = 37
 
         applicationId = "com.github.terrakok.wikwok.androidApp"
         versionCode = 5
