@@ -25,11 +25,11 @@ jobs:
           cache-encryption-key: ${{ secrets.GRADLE_CACHE_ENCRYPTION_KEY }}
 
       - name: Build
-        run: ./gradlew :webApp:composeCompatibilityBrowserDistribution
+        run: ./gradlew :webApp:wasmJsBrowserDistribution
 
       - name: Deploy to Cloudflare Workers
         uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy ../webApp/build/dist/composeWebCompatibility/productionExecutable --project-name=wikwok-terrakok
+          command: pages deploy ./webApp/build/dist/wasmJs/productionExecutable --project-name=wikwok-terrakok
