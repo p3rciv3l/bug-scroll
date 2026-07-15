@@ -5,13 +5,15 @@ Big Scroll is a lightweight, iPhone-first Wikipedia feed built from
 `site/`: it has no logo, About menu, or language menu, and retains only the per-article
 like action and device-local Likes collection.
 
-The personalized order is derived entirely from the articles saved in
-`big-scroll.likes.v1` in the browser's `localStorage`. It uses established methods:
+The personalized order is derived from device-local likes, Read clicks, and foreground-visible
+card time. It uses established methods:
 
-- the published positive-only [Rocchio relevance-feedback equation](https://nlp.stanford.edu/IR-book/html/htmledition/the-rocchio71-algorithm-1.html)
+- [Multi-Feedback Bayesian Personalized Ranking](https://repository.ubn.ru.nl/bitstream/handle/2066/161872/1/161872.pdf) for ordered behavior levels
+- the original [Bayesian Personalized Ranking](https://www.ismll.uni-hildesheim.de/pub/pdfs/Rendle_et_al2009-Bayesian_Personalized_Ranking.pdf) pairwise update
+- adaptive log-quantile dwell bins inspired by [Yi et al., RecSys 2014](https://hongliangjie.com/publications/recsys2014.pdf)
 - signed feature hashing from [Weinberger et al., ICML 2009](https://icml.cc/Conferences/2009/papers/407.pdf)
 - the published [FNV-1a hash](https://www.ietf.org/archive/id/draft-eastlake-fnv-25.html) for fixed-size feature placement
-- the fixed `epsilon = 0.1` greedy policy from [Sutton and Barto, section 2.2](http://incompleteideas.net/book/the-book-2nd.html)
+- [Gumbel-top-k](https://arxiv.org/abs/1903.06059) sampling for a non-deterministic order without duplicates
 
 There is no server-side profile, account, database, analytics SDK, or paid hosting. GitHub
 Actions tests the recommendation model and deploys `site/` to free GitHub Pages hosting.
@@ -27,7 +29,7 @@ npm run test:baseline
 ```
 
 The WebKit suite uses Playwright's iPhone 13 emulation (not a physical phone) and covers
-likes persistence, the likes-only UI, constrained scrolling, the bounded feed, and shell
+likes and engagement persistence, the likes-only UI, constrained scrolling, the bounded feed, and shell
 cache availability while offline. CI also rebuilds untouched upstream WikWok and rejects a
 scroll-latency regression beyond the documented tolerance. Exact results are recorded in
 [`web-tests/PERFORMANCE.md`](web-tests/PERFORMANCE.md).

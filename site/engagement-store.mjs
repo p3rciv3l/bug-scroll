@@ -48,24 +48,24 @@ export class EngagementStore {
     return this.records.get(this.keyFor(article));
   }
 
-  update(article, changes) {
+  update(article, changes, { persist = true } = {}) {
     const key = this.keyFor(article);
     const current = this.records.get(key) || { article, clicked: false, viewMs: 0, updatedAt: 0 };
     const next = { ...current, ...changes, article, updatedAt: this.now() };
     this.records.set(key, next);
     this.trim();
-    this.persist();
+    if (persist) this.persist();
     return next;
   }
 
-  recordClick(article) {
-    return this.update(article, { clicked: true });
+  recordClick(article, options) {
+    return this.update(article, { clicked: true }, options);
   }
 
-  recordView(article, elapsedMs) {
+  recordView(article, elapsedMs, options) {
     const current = this.get(article);
     const viewMs = Math.min(MAX_VIEW_MS, (current?.viewMs || 0) + Math.max(0, Number(elapsedMs) || 0));
-    return this.update(article, { viewMs });
+    return this.update(article, { viewMs }, options);
   }
 
   trim() {

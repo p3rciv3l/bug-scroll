@@ -68,14 +68,73 @@ test("visible time and Read clicks become local recommendation feedback", async 
 
   await expect.poll(() => page.evaluate((pageid) => {
     const payload = JSON.parse(localStorage.getItem("big-scroll.engagement.v1"));
-    return payload?.engagements?.find(({ article }) => article.pageid === pageid);
-  }, firstPageId)).toMatchObject({ clicked: true, viewMs: expect.any(Number) });
+    const item = payload?.engagements?.find(({ article }) => article.pageid === pageid);
+    return item && { clicked: item.clicked, hasView: item.viewMs > 100 };
+  }, firstPageId)).toEqual({ clicked: true, hasView: true });
 
   const first = await page.evaluate((pageid) => {
     const payload = JSON.parse(localStorage.getItem("big-scroll.engagement.v1"));
     return payload.engagements.find(({ article }) => article.pageid === pageid);
   }, firstPageId);
   expect(first.viewMs).toBeGreaterThan(100);
+});
+
+test("warm engagement history batches scroll-time persistence", async ({ page }) => {
+  await mockWikipedia(page, { latency: 0 });
+  await page.addInitScript(() => {
+    const engagements = Array.from({ length: 250 }, (_, index) => ({
+      article: {
+        pageid: 10_000 + index,
+        title: `History article ${index}`,
+        extract: "Science, history, culture, technology, medicine, and art.",
+        url: `https://en.wikipedia.org/?curid=${10_000 + index}`,
+      },
+      clicked: index % 3 === 0,
+      viewMs: 5_000 + index,
+      updatedAt: index,
+    }));
+    const original = Storage.prototype.setItem;
+    original.call(localStorage, "big-scroll.engagement.v1", JSON.stringify({ version: 1, engagements }));
+    window.__engagementWrites = 0;
+    Storage.prototype.setItem = function setItem(key, value) {
+      if (key === "big-scroll.engagement.v1") window.__engagementWrites += 1;
+      return original.call(this, key, value);
+    };
+  });
+  await page.goto("/");
+  await expect(page.locator(".article")).toHaveCount(10);
+
+  for (let index = 1; index < 5; index += 1) {
+    await page.locator(".article").nth(index).scrollIntoViewIfNeeded();
+    await page.waitForTimeout(150);
+  }
+
+  expect(await page.evaluate(() => window.__engagementWrites)).toBeLessThanOrEqual(1);
+});
+
+test("persisted engagement changes the next ranking after reload", async ({ page }) => {
+  await page.addInitScript(() => { Math.random = () => 0.5; });
+  const image = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='390' height='844'%3E%3Crect width='390' height='844' fill='%23263548'/%3E%3C/svg%3E";
+  await page.route("https://en.wikipedia.org/w/api.php**", (route) => route.fulfill({ json: {
+    query: { pages: {
+      101: { pageid: 101, title: "French cooking", extract: "Recipes, bread, sauce, pastry, cuisine and restaurants.", fullurl: "https://en.wikipedia.org/?curid=101", thumbnail: { source: image } },
+      102: { pageid: 102, title: "Lunar spacecraft", extract: "A spacecraft, rocket, astronaut and lunar orbit mission.", fullurl: "https://en.wikipedia.org/?curid=102", thumbnail: { source: image } },
+    } },
+  } }));
+
+  await page.goto("/");
+  await expect(page.locator(".article h2").first()).toHaveText("French cooking");
+  await page.locator(".read-link").nth(1).evaluate((link) => {
+    addEventListener("click", (event) => event.preventDefault(), { capture: true, once: true });
+    link.click();
+  });
+  await page.locator(".article").nth(1).scrollIntoViewIfNeeded();
+  await page.waitForTimeout(300);
+  await page.locator(".article").first().scrollIntoViewIfNeeded();
+  await page.waitForTimeout(700);
+  await page.reload();
+
+  await expect(page.locator(".article h2").first()).toHaveText("Lunar spacecraft");
 });
 
 test("long constrained session keeps images present and frame gaps bounded", async ({ page }) => {
@@ -94,6 +153,7 @@ test("long constrained session keeps images present and frame gaps bounded", asy
   await page.goto("/");
   await expect(page.locator(".article")).toHaveCount(10);
   await expect(page.locator("#likes-count")).toHaveText("30");
+  const firstPageId = Number(await page.locator(".article").first().getAttribute("data-pageid"));
 
   for (let batch = 0; batch < 6; batch += 1) {
     const previousCalls = wikipedia.calls;
@@ -115,6 +175,20 @@ test("long constrained session keeps images present and frame gaps bounded", asy
   expect(timing.frames).toBeGreaterThan(15);
   expect(timing.p95).toBeLessThan(50);
   expect(timing.max).toBeLessThan(150);
+
+  const viewBefore = await page.evaluate((pageid) => {
+    const payload = JSON.parse(localStorage.getItem("big-scroll.engagement.v1") || "{\"engagements\":[]}");
+    return payload.engagements.find(({ article }) => article.pageid === pageid)?.viewMs || 0;
+  }, firstPageId);
+  await page.locator(".article").first().scrollIntoViewIfNeeded();
+  await page.waitForTimeout(250);
+  await page.locator(".article").nth(1).scrollIntoViewIfNeeded();
+  await page.waitForTimeout(700);
+  const viewAfter = await page.evaluate((pageid) => {
+    const payload = JSON.parse(localStorage.getItem("big-scroll.engagement.v1"));
+    return payload.engagements.find(({ article }) => article.pageid === pageid)?.viewMs || 0;
+  }, firstPageId);
+  expect(viewAfter).toBeGreaterThan(viewBefore);
 });
 
 test("feed excludes articles without usable images", async ({ page }) => {

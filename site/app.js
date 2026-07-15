@@ -1,10 +1,11 @@
-import { EngagementRecommender } from "./recommender.mjs";
+import { MultiFeedbackBprRecommender } from "./recommender.mjs";
 import { EngagementStore } from "./engagement-store.mjs";
 import { loadLikes, saveLikes } from "./likes-store.mjs";
 
 const API_ENDPOINT = "https://en.wikipedia.org/w/api.php";
 const BATCH_SIZE = 10;
 const PAGINATION_SETTLE_MS = 200;
+const FEEDBACK_SETTLE_MS = 500;
 const HEART_OUTLINE_PATH = "M480 840 422 788Q321 697 255 631T150 512.5Q111 460 95.5 416T80 326Q80 232 143 169T300 106Q352 106 399 128T480 190Q514 150 561 128T660 106Q754 106 817 169T880 326Q880 372 864.5 416T810 512.5Q771 565 705 631T538 788L480 840ZM480 732Q576 646 638 584.5T736 477.5Q772 432 786 396.5T800 326Q800 266 760 226T660 186Q613 186 573 212.5T518 280H442Q427 239 387 212.5T300 186Q240 186 200 226T160 326Q160 361 174 396.5T224 477.5Q260 523 322 584.5T480 732Z";
 const HEART_FILL_PATH = "M480 840 422 788Q321 697 255 631T150 512.5Q111 460 95.5 416T80 326Q80 232 143 169T300 106Q352 106 399 128T480 190Q514 150 561 128T660 106Q754 106 817 169T880 326Q880 372 864.5 416T810 512.5Q771 565 705 631T538 788L480 840Z";
 const feed = document.querySelector("#feed");
@@ -17,7 +18,7 @@ const likesCount = document.querySelector("#likes-count");
 const seen = new Set();
 let likes = loadLikes();
 const engagementStore = new EngagementStore();
-const recommender = new EngagementRecommender({
+const recommender = new MultiFeedbackBprRecommender({
   likedArticles: [...likes.values()],
   engagements: engagementStore.values(),
 });
@@ -25,57 +26,70 @@ let loading = false;
 let requestSequence = 0;
 let loadTrigger = null;
 let loadTimer = 0;
-const trackedArticles = new Map();
+let feedbackTimer = 0;
+let feedbackDirty = false;
+let viewFrame = 0;
+let activeView = null;
+const articleElements = new WeakMap();
+
+function flushFeedback() {
+  clearTimeout(feedbackTimer);
+  feedbackTimer = 0;
+  if (!feedbackDirty) return;
+  engagementStore.persist();
+  recommender.rebuild();
+  feedbackDirty = false;
+}
+
+function scheduleFeedback() {
+  feedbackDirty = true;
+  clearTimeout(feedbackTimer);
+  feedbackTimer = setTimeout(flushFeedback, FEEDBACK_SETTLE_MS);
+}
 
 function recordClick(article) {
-  recommender.setEngagement(engagementStore.recordClick(article));
+  recommender.setEngagement(engagementStore.recordClick(article, { persist: false }), false);
+  scheduleFeedback();
 }
 
 function recordView(article, elapsedMs) {
   if (elapsedMs <= 0) return;
-  recommender.setEngagement(engagementStore.recordView(article, elapsedMs));
+  const engagement = engagementStore.recordView(article, elapsedMs, { persist: false });
+  recommender.setEngagement(engagement, false);
+  scheduleFeedback();
 }
 
 function trackingEnabled() {
   return !document.hidden && !likesPanel.classList.contains("open");
 }
 
-function startView(item, now = performance.now()) {
-  if (item.eligible && item.startedAt === null && trackingEnabled()) item.startedAt = now;
-}
-
-function finishView(item, now = performance.now()) {
-  if (item.startedAt === null) return;
-  recordView(item.article, now - item.startedAt);
-  item.startedAt = null;
-}
-
 function pauseViews() {
-  const now = performance.now();
-  for (const item of trackedArticles.values()) finishView(item, now);
+  if (!activeView) return;
+  recordView(activeView.article, performance.now() - activeView.startedAt);
+  activeView = null;
 }
 
 function resumeViews() {
-  const now = performance.now();
-  for (const item of trackedArticles.values()) startView(item, now);
+  scheduleActiveView();
 }
 
-const dwellObserver = new IntersectionObserver((entries) => {
-  const now = performance.now();
-  for (const entry of entries) {
-    const item = trackedArticles.get(entry.target);
-    if (!item) continue;
-    item.eligible = entry.isIntersecting && entry.intersectionRatio >= 0.6;
-    if (item.eligible) startView(item, now);
-    else finishView(item, now);
+function refreshActiveView() {
+  viewFrame = 0;
+  if (!trackingEnabled()) {
+    pauseViews();
+    return;
   }
-}, { root: feed, threshold: [0, 0.6] });
+  const bounds = feed.getBoundingClientRect();
+  const center = document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2);
+  const section = center?.closest("article.article");
+  if (section === activeView?.section) return;
+  pauseViews();
+  const article = articleElements.get(section);
+  if (article) activeView = { section, article, startedAt: performance.now() };
+}
 
-function stopTracking(section) {
-  const item = trackedArticles.get(section);
-  if (item) finishView(item);
-  trackedArticles.delete(section);
-  dwellObserver.unobserve(section);
+function scheduleActiveView() {
+  if (!viewFrame) viewFrame = requestAnimationFrame(refreshActiveView);
 }
 
 function persistLikes() {
@@ -179,7 +193,7 @@ function createArticle(article) {
   prepareImage(image, article.image);
   image.addEventListener("load", () => image.classList.add("is-loaded"));
   image.addEventListener("error", () => {
-    stopTracking(section);
+    if (activeView?.section === section) pauseViews();
     observer.unobserve(section);
     section.remove();
     void loadMore();
@@ -210,8 +224,7 @@ function createArticle(article) {
   readLink.addEventListener("click", () => recordClick(article));
   content.append(header, extract, readLink);
   section.append(shade, content);
-  trackedArticles.set(section, { article, eligible: false, startedAt: null });
-  dwellObserver.observe(section);
+  articleElements.set(section, article);
   return section;
 }
 
@@ -286,6 +299,7 @@ const observer = new IntersectionObserver((entries) => {
 }, { root: feed, rootMargin: "100% 0px" });
 
 feed.addEventListener("scroll", () => {
+  scheduleActiveView();
   if (loadTimer) scheduleLoadMore();
 }, { passive: true });
 
@@ -295,6 +309,7 @@ async function loadMore(attempt = 0) {
   if (feed.children.length === 0) setStatus("Finding articles…");
   try {
     const candidates = await fetchCandidates();
+    flushFeedback();
     const ranked = recommender.rerank(candidates);
     const fragment = document.createDocumentFragment();
     for (const article of ranked) {
@@ -303,6 +318,7 @@ async function loadMore(attempt = 0) {
       fragment.append(element);
     }
     feed.append(fragment);
+    scheduleActiveView();
     if (loadTrigger) observer.unobserve(loadTrigger);
     loadTrigger = feed.lastElementChild;
     if (loadTrigger) observer.observe(loadTrigger);
@@ -345,7 +361,10 @@ document.addEventListener("visibilitychange", () => {
   if (document.hidden) pauseViews();
   else resumeViews();
 });
-addEventListener("pagehide", pauseViews);
+addEventListener("pagehide", () => {
+  pauseViews();
+  flushFeedback();
+});
 document.addEventListener("keydown", (event) => {
   if (!likesPanel.classList.contains("open")) return;
   if (event.key === "Escape") hideLikes();
