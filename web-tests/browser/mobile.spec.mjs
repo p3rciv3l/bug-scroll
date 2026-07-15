@@ -107,10 +107,12 @@ test("long constrained session keeps DOM, images, and frame gaps bounded", async
   }
 
   await page.waitForTimeout(500);
+  expect(wikipedia.calls).toBeGreaterThanOrEqual(19);
   expect(await page.locator(".article").count()).toBeLessThanOrEqual(48);
   expect(await page.locator(".article-image[src]").count()).toBeLessThanOrEqual(5);
 
   const timing = await sampleOneCardScroll(page);
+  console.log(`iPhone constrained scroll: ${JSON.stringify(timing)}`);
   expect(timing.frames).toBeGreaterThan(15);
   expect(timing.p95).toBeLessThan(50);
   expect(timing.max).toBeLessThan(150);
