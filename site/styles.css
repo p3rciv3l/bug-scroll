@@ -78,15 +78,6 @@ button { font: inherit; }
     linear-gradient(90deg, rgba(0, 0, 0, .35), transparent 60%);
 }
 
-.article.no-image::before,
-.article.image-failed::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: -3;
-  background: radial-gradient(circle at 25% 20%, #314866, #161925 43%, #080808 82%);
-}
-
 .article-content {
   align-self: flex-end;
   width: min(100%, 760px);
@@ -134,8 +125,7 @@ button { font: inherit; }
   gap: 10px;
 }
 
-.heart-button,
-.share-button {
+.heart-button {
   display: grid;
   width: 48px;
   height: 48px;
@@ -153,10 +143,8 @@ button { font: inherit; }
 }
 
 .heart-button svg { width: 30px; height: 30px; fill: currentColor; }
-.share-button svg { width: 28px; height: 28px; fill: currentColor; }
 .heart-button[aria-pressed="true"] { background: #ff2d40; color: #fff; }
-.heart-button:active,
-.share-button:active { transform: scale(.92); }
+.heart-button:active { transform: scale(.92); }
 
 button:focus-visible,
 a:focus-visible {

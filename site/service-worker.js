@@ -1,5 +1,5 @@
-const CACHE = "big-scroll-shell-v5";
-const SHELL = ["./", "./index.html", "./styles.css", "./app.js", "./likes-store.mjs", "./recommender.mjs"];
+const CACHE = "big-scroll-shell-v8";
+const SHELL = ["./", "./index.html", "./styles.css?v=8", "./app.js?v=8", "./likes-store.mjs", "./recommender.mjs"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL)));

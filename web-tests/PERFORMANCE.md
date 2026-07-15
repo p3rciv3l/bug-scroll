@@ -26,8 +26,8 @@ node web-tests/compare-upstream.mjs
 `browser/mobile.spec.mjs` is the deployment gate under Playwright's iPhone 13 emulation
 (WebKit, viewport, scale, and user agent—not a physical phone). It starts with 30 persisted
 likes, uses 180 ms mocked API latency plus the same main-thread pressure, scrolls through
-more than 200 articles, checks the 48-card DOM and five-image bounds, records frame gaps,
-verifies likes across reload, and asserts the absence of logo, About, and language controls.
+seven ten-article batches, verifies that every card retains a direct image source, records
+frame gaps, verifies likes across reload, and asserts that Likes is the only added control.
 `browser/cache.spec.mjs` separately allows the service worker, verifies its populated shell
 cache remains readable while offline. CI builds untouched upstream `552a5c1`, runs this comparison,
 on a macOS-hosted WebKit runner, and fails if Big Scroll exceeds upstream by more than 3 ms
