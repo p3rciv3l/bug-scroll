@@ -1,4 +1,4 @@
-const CACHE = "big-scroll-shell-v4";
+const CACHE = "big-scroll-shell-v5";
 const SHELL = ["./", "./index.html", "./styles.css", "./app.js", "./likes-store.mjs", "./recommender.mjs"];
 
 self.addEventListener("install", (event) => {

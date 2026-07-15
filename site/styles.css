@@ -65,7 +65,11 @@ button { font: inherit; }
   object-fit: cover;
   z-index: -3;
   background: #151515;
+  opacity: 0;
+  transition: opacity 120ms ease-out;
 }
+
+.article-image.is-loaded { opacity: 1; }
 
 .article-shade {
   z-index: -2;
@@ -74,7 +78,8 @@ button { font: inherit; }
     linear-gradient(90deg, rgba(0, 0, 0, .35), transparent 60%);
 }
 
-.article.no-image::before {
+.article.no-image::before,
+.article.image-failed::before {
   content: "";
   position: absolute;
   inset: 0;
@@ -86,14 +91,22 @@ button { font: inherit; }
   align-self: flex-end;
   width: min(100%, 760px);
   padding: 24px max(24px, var(--safe-right)) max(34px, calc(var(--safe-bottom) + 22px)) max(24px, var(--safe-left));
-  padding-right: max(88px, calc(var(--safe-right) + 72px));
   text-shadow: 0 1px 18px rgba(0, 0, 0, .72);
+}
+
+.article-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
 }
 
 .article h2 {
   display: -webkit-box;
+  flex: 1;
+  min-width: 0;
   max-width: 18ch;
-  margin: 0 0 12px;
+  margin: 0;
   overflow: hidden;
   font-size: clamp(2rem, 8vw, 4.75rem);
   line-height: .98;
@@ -115,32 +128,37 @@ button { font: inherit; }
 }
 
 .article-actions {
-  position: absolute;
-  right: max(14px, var(--safe-right));
-  bottom: max(38px, calc(var(--safe-bottom) + 26px));
-  display: grid;
-  gap: 14px;
-  justify-items: center;
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 10px;
 }
 
-.heart-button {
+.heart-button,
+.share-button {
   display: grid;
-  width: 58px;
-  height: 58px;
+  width: 48px;
+  height: 48px;
   place-items: center;
   border: 0;
   border-radius: 50%;
-  background: rgba(13, 13, 13, .62);
+  background: rgba(28, 28, 32, .72);
   box-shadow: 0 4px 24px rgba(0, 0, 0, .28);
   color: #fff;
-  font-size: 31px;
-  line-height: 1;
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
 }
 
-.heart-button[aria-pressed="true"] { color: #ff375f; }
-.heart-button:active { transform: scale(.92); }
+.heart-button {
+  width: 64px;
+  height: 64px;
+}
+
+.heart-button svg { width: 30px; height: 30px; fill: currentColor; }
+.share-button svg { width: 28px; height: 28px; fill: currentColor; }
+.heart-button[aria-pressed="true"] { background: #ff2d40; color: #fff; }
+.heart-button:active,
+.share-button:active { transform: scale(.92); }
 
 button:focus-visible,
 a:focus-visible {
@@ -149,14 +167,16 @@ a:focus-visible {
 }
 
 .read-link {
-  display: grid;
+  display: inline-flex;
+  width: fit-content;
   min-width: 44px;
   min-height: 44px;
-  place-items: center;
+  align-items: center;
+  margin-top: 4px;
   color: #fff;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 700;
-  text-decoration: none;
+  text-underline-offset: 3px;
   text-shadow: 0 1px 8px #000;
 }
 

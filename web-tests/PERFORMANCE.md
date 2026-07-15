@@ -11,8 +11,8 @@ median trial so a one-off shared-runner scheduling stall cannot decide the deplo
 
 | Build | p95 frame gap | Frames over 50 ms | Maximum gap | Deployable size |
 | --- | ---: | ---: | ---: | ---: |
-| Big Scroll | 20 ms | 0 | 21 ms | 25,484 bytes |
-| Upstream WikWok | 20 ms | 0 | 25 ms | 15,719,738 bytes |
+| Big Scroll | 20 ms | 0 | 20 ms | 30,648 bytes |
+| Upstream WikWok | 20 ms | 0 | 24 ms | 15,719,738 bytes |
 
 Big Scroll therefore did not regress measured steady-state scroll latency in this constrained,
 same-machine comparison. Reproduce it after building upstream with:

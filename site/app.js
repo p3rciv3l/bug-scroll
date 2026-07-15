@@ -6,6 +6,10 @@ const BATCH_SIZE = 12;
 const MAX_FEED_CARDS = 48;
 const TARGET_FEED_CARDS = 36;
 const KEEP_BEHIND = 12;
+const IMAGE_RETRY_LIMIT = 2;
+const HEART_OUTLINE_PATH = "M480 840 422 788Q321 697 255 631T150 512.5Q111 460 95.5 416T80 326Q80 232 143 169T300 106Q352 106 399 128T480 190Q514 150 561 128T660 106Q754 106 817 169T880 326Q880 372 864.5 416T810 512.5Q771 565 705 631T538 788L480 840ZM480 732Q576 646 638 584.5T736 477.5Q772 432 786 396.5T800 326Q800 266 760 226T660 186Q613 186 573 212.5T518 280H442Q427 239 387 212.5T300 186Q240 186 200 226T160 326Q160 361 174 396.5T224 477.5Q260 523 322 584.5T480 732Z";
+const HEART_FILL_PATH = "M480 840 422 788Q321 697 255 631T150 512.5Q111 460 95.5 416T80 326Q80 232 143 169T300 106Q352 106 399 128T480 190Q514 150 561 128T660 106Q754 106 817 169T880 326Q880 372 864.5 416T810 512.5Q771 565 705 631T538 788L480 840Z";
+const SHARE_PATH = "M680 880Q630 880 595 845T560 760Q560 754 563 732L282 568Q266 583 245 591.5T200 600Q150 600 115 565T80 480Q80 430 115 395T200 360Q224 360 245 368.5T282 392L563 228Q560 217 560 200Q560 150 595 115T680 80Q730 80 765 115T800 200Q800 250 765 285T680 320Q656 320 635 311.5T598 288L317 452Q320 463 320 480T317 508L598 672Q614 657 635 648.5T680 640Q730 640 765 675T800 760Q800 810 765 845T680 880ZM680 800Q697 800 708.5 788.5T720 760Q720 743 708.5 731.5T680 720Q663 720 651.5 731.5T640 760Q640 777 651.5 788.5T680 800ZM200 520Q217 520 228.5 508.5T240 480Q240 463 228.5 451.5T200 440Q183 440 171.5 451.5T160 480Q160 497 171.5 508.5T200 520ZM680 240Q697 240 708.5 228.5T720 200Q720 183 708.5 171.5T680 160Q663 160 651.5 171.5T640 200Q640 217 651.5 228.5T680 240Z";
 const feed = document.querySelector("#feed");
 const status = document.querySelector("#status");
 const openLikes = document.querySelector("#open-likes");
@@ -20,6 +24,7 @@ let loading = false;
 let requestSequence = 0;
 let activeArticleId = null;
 let pruneTimer = 0;
+const imageRetryTimers = new WeakMap();
 
 function persistLikes() {
   if (!saveLikes(likes)) {
@@ -42,6 +47,68 @@ function whenIdle() {
 
 function articleImage(article) {
   return article.thumbnail?.source || "";
+}
+
+function createActionIcon(path) {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 960 960");
+  svg.setAttribute("aria-hidden", "true");
+  const shape = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  shape.setAttribute("d", path);
+  svg.append(shape);
+  return svg;
+}
+
+function setHeartState(button, article, liked) {
+  button.replaceChildren(createActionIcon(liked ? HEART_FILL_PATH : HEART_OUTLINE_PATH));
+  button.setAttribute("aria-label", `${liked ? "Unlike" : "Like"} ${article.title}`);
+  button.setAttribute("aria-pressed", String(liked));
+}
+
+function clearImageRetry(image) {
+  const timer = imageRetryTimers.get(image);
+  if (timer) clearTimeout(timer);
+  imageRetryTimers.delete(image);
+}
+
+function retryImage(image) {
+  if (image.dataset.hydrated !== "true") return;
+  const retry = Number(image.dataset.retryCount || 0) + 1;
+  if (retry > IMAGE_RETRY_LIMIT) {
+    image.closest(".article")?.classList.add("image-failed");
+    return;
+  }
+  image.dataset.retryCount = String(retry);
+  clearImageRetry(image);
+  const timer = setTimeout(() => {
+    if (!image.isConnected || image.dataset.hydrated !== "true") return;
+    const url = new URL(image.dataset.src, location.href);
+    url.searchParams.set("big_scroll_retry", String(retry));
+    image.removeAttribute("src");
+    requestAnimationFrame(() => {
+      if (image.isConnected && image.dataset.hydrated === "true") image.src = url.href;
+    });
+  }, 160 * (2 ** (retry - 1)));
+  imageRetryTimers.set(image, timer);
+}
+
+function prepareRetriableImage(image, source, { manualHydration = true } = {}) {
+  image.alt = "";
+  image.decoding = "async";
+  image.loading = manualHydration ? "eager" : "lazy";
+  image.dataset.src = source;
+  image.dataset.hydrated = manualHydration ? "false" : "true";
+  image.dataset.retryCount = "0";
+  image.addEventListener("load", () => {
+    clearImageRetry(image);
+    image.classList.add("is-loaded");
+    image.closest(".article")?.classList.remove("image-failed");
+  });
+  image.addEventListener("error", () => {
+    image.classList.remove("is-loaded");
+    retryImage(image);
+  });
+  if (!manualHydration) image.src = source;
 }
 
 function normalizeArticle(page) {
@@ -87,11 +154,37 @@ function createHeartButton(article) {
   const button = document.createElement("button");
   button.className = "heart-button";
   button.type = "button";
-  button.textContent = "♥";
   const liked = likes.has(String(article.pageid));
-  button.setAttribute("aria-label", `${liked ? "Unlike" : "Like"} ${article.title}`);
-  button.setAttribute("aria-pressed", String(liked));
+  setHeartState(button, article, liked);
   button.addEventListener("click", () => toggleLike(article, button));
+  return button;
+}
+
+async function shareArticle(article) {
+  try {
+    if (navigator.share) {
+      await navigator.share({ title: article.title, url: article.url });
+      return;
+    }
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(article.url);
+      setStatus("Link copied.");
+      setTimeout(() => setStatus("", false), 1400);
+      return;
+    }
+    window.open(article.url, "_blank", "noopener,noreferrer");
+  } catch (error) {
+    if (error?.name !== "AbortError") window.open(article.url, "_blank", "noopener,noreferrer");
+  }
+}
+
+function createShareButton(article) {
+  const button = document.createElement("button");
+  button.className = "share-button";
+  button.type = "button";
+  button.setAttribute("aria-label", `Share ${article.title}`);
+  button.append(createActionIcon(SHARE_PATH));
+  button.addEventListener("click", () => void shareArticle(article));
   return button;
 }
 
@@ -103,10 +196,7 @@ function createArticle(article) {
   if (article.image) {
     const image = document.createElement("img");
     image.className = "article-image";
-    image.alt = "";
-    image.loading = "lazy";
-    image.decoding = "async";
-    image.dataset.src = article.image;
+    prepareRetriableImage(image, article.image);
     section.append(image);
   }
 
@@ -118,18 +208,21 @@ function createArticle(article) {
   heading.textContent = article.title;
   const extract = document.createElement("p");
   extract.textContent = article.extract;
-  content.append(heading, extract);
 
   const actions = document.createElement("div");
   actions.className = "article-actions";
+  actions.append(createHeartButton(article), createShareButton(article));
+  const header = document.createElement("div");
+  header.className = "article-header";
+  header.append(heading, actions);
   const readLink = document.createElement("a");
   readLink.className = "read-link";
   readLink.href = article.url;
   readLink.target = "_blank";
   readLink.rel = "noopener noreferrer";
-  readLink.textContent = "Read";
-  actions.append(createHeartButton(article), readLink);
-  section.append(shade, content, actions);
+  readLink.textContent = "Read article →";
+  content.append(header, extract, readLink);
+  section.append(shade, content);
   return section;
 }
 
@@ -138,13 +231,11 @@ function toggleLike(article, button) {
   if (likes.has(key)) {
     likes.delete(key);
     recommender.unlike(article);
-    button?.setAttribute("aria-pressed", "false");
-    button?.setAttribute("aria-label", `Like ${article.title}`);
+    if (button) setHeartState(button, article, false);
   } else {
     likes.set(key, article);
     recommender.like(article);
-    button?.setAttribute("aria-pressed", "true");
-    button?.setAttribute("aria-label", `Unlike ${article.title}`);
+    if (button) setHeartState(button, article, true);
   }
   persistLikes();
   renderLikes();
@@ -163,10 +254,6 @@ function renderLikes() {
   for (const article of [...likes.values()].reverse()) {
     const card = document.createElement("article");
     card.className = "liked-card";
-    const image = document.createElement("img");
-    image.alt = "";
-    image.loading = "lazy";
-    if (article.image) image.src = article.image;
     const copy = document.createElement("div");
     copy.className = "liked-card-copy";
     const link = document.createElement("a");
@@ -185,7 +272,13 @@ function renderLikes() {
     remove.addEventListener("click", () => {
       toggleLike(article, feed.querySelector(`[data-pageid="${article.pageid}"] .heart-button`));
     });
-    card.append(image, copy, remove);
+    if (article.image) {
+      const image = document.createElement("img");
+      image.className = "liked-card-image";
+      prepareRetriableImage(image, article.image, { manualHydration: false });
+      card.append(image);
+    }
+    card.append(copy, remove);
     likedArticles.append(card);
   }
 }
@@ -197,8 +290,14 @@ function hydrateNearbyImages() {
     const image = cards[index].querySelector("img");
     if (!image) continue;
     if (Math.abs(index - activeIndex) <= 2 && !image.getAttribute("src")) {
+      image.dataset.hydrated = "true";
+      image.dataset.retryCount = "0";
       image.src = image.dataset.src;
     } else if (Math.abs(index - activeIndex) > 2) {
+      image.dataset.hydrated = "false";
+      image.dataset.retryCount = "0";
+      clearImageRetry(image);
+      image.classList.remove("is-loaded");
       image.removeAttribute("src");
     }
   }
