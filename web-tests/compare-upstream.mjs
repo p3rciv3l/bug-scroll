@@ -46,7 +46,7 @@ function aggregate(name, trials) {
 const surfaces = {
   current: {
     name: "Big Scroll",
-    ready: (page) => page.locator(".article").nth(35).waitFor({ timeout: 30_000 }),
+    ready: (page) => page.locator(".article").first().waitFor({ timeout: 30_000 }),
     snapshot: (page) => page.locator("#feed").evaluate((feed) => String(feed.scrollTop)),
   },
   upstream: {
