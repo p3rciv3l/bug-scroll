@@ -1,37 +1,5 @@
 import { expect, test } from "@playwright/test";
-
-async function mockWikipedia(page, latency = 120) {
-  const state = { calls: 0 };
-  await page.route("https://en.wikipedia.org/w/api.php**", async (route) => {
-    state.calls += 1;
-    await new Promise((resolve) => setTimeout(resolve, latency));
-    const pages = {};
-    for (let index = 0; index < 12; index += 1) {
-      const pageid = state.calls * 100 + index;
-      pages[pageid] = {
-        pageid,
-        title: `Test article ${pageid}`,
-        extract: "Science, history, culture, technology, medicine, and art in a compact summary.",
-        fullurl: `https://en.wikipedia.org/?curid=${pageid}`,
-        thumbnail: {
-          source: `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='390' height='844'%3E%3Crect width='100%25' height='100%25' fill='%23263548'/%3E%3C/svg%3E`,
-        },
-        categories: [{ title: `Category:Topic ${index % 4}` }],
-      };
-    }
-    await route.fulfill({ json: { query: { pages } } });
-  });
-  return state;
-}
-
-async function addConstrainedCpuLoad(page) {
-  await page.addInitScript(() => {
-    setInterval(() => {
-      const finish = performance.now() + 3;
-      while (performance.now() < finish) { /* approximate a slower phone main thread */ }
-    }, 16);
-  });
-}
+import { addConstrainedCpuLoad, mockWikipedia } from "../browser-fixtures.mjs";
 
 async function sampleOneCardScroll(page) {
   return page.locator("#feed").evaluate(async (feed) => {
@@ -63,7 +31,7 @@ async function sampleOneCardScroll(page) {
 }
 
 test("iPhone feed keeps only Likes UI and persists a like", async ({ page }) => {
-  await mockWikipedia(page, 150);
+  await mockWikipedia(page, { latency: 150 });
   await page.goto("/");
   await expect(page.locator(".article")).toHaveCount(12);
 
@@ -81,7 +49,7 @@ test("iPhone feed keeps only Likes UI and persists a like", async ({ page }) => 
 });
 
 test("long constrained session keeps DOM, images, and frame gaps bounded", async ({ page }) => {
-  const wikipedia = await mockWikipedia(page, 180);
+  const wikipedia = await mockWikipedia(page, { latency: 180 });
   await addConstrainedCpuLoad(page);
   await page.addInitScript(() => {
     const articles = Array.from({ length: 30 }, (_, index) => ({

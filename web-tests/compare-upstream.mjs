@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { devices, webkit } from "@playwright/test";
+import { addConstrainedCpuLoad, mockWikipedia } from "./browser-fixtures.mjs";
 
 const currentUrl = process.env.CURRENT_URL || "http://127.0.0.1:4173/";
 const upstreamUrl = process.env.UPSTREAM_URL || "http://127.0.0.1:4174/";
@@ -25,30 +26,22 @@ function summarize(gaps) {
   };
 }
 
-async function mockWikipedia(page) {
-  let batch = 0;
-  await page.route("https://*.wikipedia.org/w/api.php**", async (route) => {
-    batch += 1;
-    await new Promise((resolve) => setTimeout(resolve, 150));
-    const pages = {};
-    for (let index = 0; index < 12; index += 1) {
-      const pageid = batch * 100 + index;
-      pages[pageid] = {
-        pageid,
-        title: `Baseline article ${pageid}`,
-        extract: "Science, history, medicine, technology, culture, and art.",
-        fullurl: `https://en.wikipedia.org/?curid=${pageid}`,
-        thumbnail: {
-          source: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='390' height='844'%3E%3Crect width='100%25' height='100%25' fill='%23263548'/%3E%3C/svg%3E",
-        },
-        categories: [{ title: `Category:Topic ${index % 4}` }],
-      };
-    }
-    await route.fulfill({ json: { query: { pages } } });
-  });
-}
+const surfaces = {
+  current: {
+    name: "Big Scroll",
+    ready: (page) => page.locator(".article").first().waitFor(),
+    snapshot: (page) => page.locator("#feed").evaluate((feed) => String(feed.scrollTop)),
+  },
+  upstream: {
+    name: "Upstream WikWok",
+    ready: (page) => page.locator("canvas").first().waitFor({ timeout: 30_000 }),
+    snapshot: async (page) => createHash("sha256")
+      .update(await page.locator("canvas").first().screenshot())
+      .digest("hex"),
+  },
+};
 
-async function measure(browser, name, url) {
+async function measure(browser, surface, url) {
   const context = await browser.newContext({
     viewport: { width: 390, height: 844 },
     deviceScaleFactor: 3,
@@ -56,21 +49,17 @@ async function measure(browser, name, url) {
     serviceWorkers: "block",
   });
   const page = await context.newPage();
-  await mockWikipedia(page);
-  await page.addInitScript(() => {
-    setInterval(() => {
-      const finish = performance.now() + 3;
-      while (performance.now() < finish) { /* same constrained main-thread load */ }
-    }, 16);
+  await mockWikipedia(page, {
+    latency: 150,
+    pattern: "https://*.wikipedia.org/w/api.php**",
+    titlePrefix: "Baseline article",
   });
+  await addConstrainedCpuLoad(page);
   await page.goto(url);
-  if (name === "Big Scroll") await page.locator(".article").first().waitFor();
-  else await page.locator("canvas").first().waitFor({ timeout: 30_000 });
+  await surface.ready(page);
   await page.waitForTimeout(1_000);
 
-  const before = name === "Big Scroll"
-    ? String(await page.locator("#feed").evaluate((feed) => feed.scrollTop))
-    : createHash("sha256").update(await page.locator("canvas").first().screenshot()).digest("hex");
+  const before = await surface.snapshot(page);
 
   await page.evaluate(() => {
     window.__frameGaps = [];
@@ -94,17 +83,15 @@ async function measure(browser, name, url) {
     return window.__frameGaps.slice(1);
   });
 
-  const after = name === "Big Scroll"
-    ? String(await page.locator("#feed").evaluate((feed) => feed.scrollTop))
-    : createHash("sha256").update(await page.locator("canvas").first().screenshot()).digest("hex");
+  const after = await surface.snapshot(page);
   await context.close();
-  return { name, changed: before !== after, ...summarize(gaps) };
+  return { name: surface.name, changed: before !== after, ...summarize(gaps) };
 }
 
 const browser = await webkit.launch();
 try {
-  const current = await measure(browser, "Big Scroll", currentUrl);
-  const upstream = await measure(browser, "Upstream WikWok", upstreamUrl);
+  const current = await measure(browser, surfaces.current, currentUrl);
+  const upstream = await measure(browser, surfaces.upstream, upstreamUrl);
   const result = {
     current,
     upstream,
