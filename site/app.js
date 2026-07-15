@@ -1,4 +1,5 @@
-import { RocchioRecommender } from "./recommender.mjs";
+import { EngagementRecommender } from "./recommender.mjs";
+import { EngagementStore } from "./engagement-store.mjs";
 import { loadLikes, saveLikes } from "./likes-store.mjs";
 
 const API_ENDPOINT = "https://en.wikipedia.org/w/api.php";
@@ -15,11 +16,67 @@ const likedArticles = document.querySelector("#liked-articles");
 const likesCount = document.querySelector("#likes-count");
 const seen = new Set();
 let likes = loadLikes();
-const recommender = new RocchioRecommender([...likes.values()]);
+const engagementStore = new EngagementStore();
+const recommender = new EngagementRecommender({
+  likedArticles: [...likes.values()],
+  engagements: engagementStore.values(),
+});
 let loading = false;
 let requestSequence = 0;
 let loadTrigger = null;
 let loadTimer = 0;
+const trackedArticles = new Map();
+
+function recordClick(article) {
+  recommender.setEngagement(engagementStore.recordClick(article));
+}
+
+function recordView(article, elapsedMs) {
+  if (elapsedMs <= 0) return;
+  recommender.setEngagement(engagementStore.recordView(article, elapsedMs));
+}
+
+function trackingEnabled() {
+  return !document.hidden && !likesPanel.classList.contains("open");
+}
+
+function startView(item, now = performance.now()) {
+  if (item.eligible && item.startedAt === null && trackingEnabled()) item.startedAt = now;
+}
+
+function finishView(item, now = performance.now()) {
+  if (item.startedAt === null) return;
+  recordView(item.article, now - item.startedAt);
+  item.startedAt = null;
+}
+
+function pauseViews() {
+  const now = performance.now();
+  for (const item of trackedArticles.values()) finishView(item, now);
+}
+
+function resumeViews() {
+  const now = performance.now();
+  for (const item of trackedArticles.values()) startView(item, now);
+}
+
+const dwellObserver = new IntersectionObserver((entries) => {
+  const now = performance.now();
+  for (const entry of entries) {
+    const item = trackedArticles.get(entry.target);
+    if (!item) continue;
+    item.eligible = entry.isIntersecting && entry.intersectionRatio >= 0.6;
+    if (item.eligible) startView(item, now);
+    else finishView(item, now);
+  }
+}, { root: feed, threshold: [0, 0.6] });
+
+function stopTracking(section) {
+  const item = trackedArticles.get(section);
+  if (item) finishView(item);
+  trackedArticles.delete(section);
+  dwellObserver.unobserve(section);
+}
 
 function persistLikes() {
   if (!saveLikes(likes)) {
@@ -122,6 +179,7 @@ function createArticle(article) {
   prepareImage(image, article.image);
   image.addEventListener("load", () => image.classList.add("is-loaded"));
   image.addEventListener("error", () => {
+    stopTracking(section);
     observer.unobserve(section);
     section.remove();
     void loadMore();
@@ -149,8 +207,11 @@ function createArticle(article) {
   readLink.target = "_blank";
   readLink.rel = "noopener noreferrer";
   readLink.textContent = "Read article →";
+  readLink.addEventListener("click", () => recordClick(article));
   content.append(header, extract, readLink);
   section.append(shade, content);
+  trackedArticles.set(section, { article, eligible: false, startedAt: null });
+  dwellObserver.observe(section);
   return section;
 }
 
@@ -189,6 +250,7 @@ function renderLikes() {
     link.target = "_blank";
     link.rel = "noopener noreferrer";
     link.textContent = article.title;
+    link.addEventListener("click", () => recordClick(article));
     const extract = document.createElement("p");
     extract.textContent = article.extract;
     copy.append(link, extract);
@@ -256,6 +318,7 @@ async function loadMore(attempt = 0) {
 }
 
 function showLikes() {
+  pauseViews();
   renderLikes();
   feed.inert = true;
   openLikes.inert = true;
@@ -272,11 +335,17 @@ function hideLikes() {
   likesPanel.classList.remove("open");
   likesPanel.setAttribute("aria-hidden", "true");
   openLikes.focus();
+  resumeViews();
 }
 
 openLikes.addEventListener("click", showLikes);
 closeLikes.addEventListener("click", hideLikes);
 likesPanel.inert = true;
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) pauseViews();
+  else resumeViews();
+});
+addEventListener("pagehide", pauseViews);
 document.addEventListener("keydown", (event) => {
   if (!likesPanel.classList.contains("open")) return;
   if (event.key === "Escape") hideLikes();

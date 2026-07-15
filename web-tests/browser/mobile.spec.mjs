@@ -53,6 +53,31 @@ test("iPhone feed keeps only Likes UI and persists a like", async ({ page }) => 
   await expect(page.locator(".liked-card")).toHaveCount(1);
 });
 
+test("visible time and Read clicks become local recommendation feedback", async ({ page }) => {
+  await mockWikipedia(page, { latency: 0 });
+  await page.goto("/");
+  await expect(page.locator(".article")).toHaveCount(10);
+
+  const firstPageId = Number(await page.locator(".article").first().getAttribute("data-pageid"));
+  await page.waitForTimeout(300);
+  const popupPromise = page.waitForEvent("popup");
+  await page.getByRole("link", { name: "Read article" }).first().click();
+  const popup = await popupPromise;
+  await popup.close();
+  await page.locator("#feed").evaluate((feed) => feed.scrollTo({ top: feed.clientHeight, behavior: "instant" }));
+
+  await expect.poll(() => page.evaluate((pageid) => {
+    const payload = JSON.parse(localStorage.getItem("big-scroll.engagement.v1"));
+    return payload?.engagements?.find(({ article }) => article.pageid === pageid);
+  }, firstPageId)).toMatchObject({ clicked: true, viewMs: expect.any(Number) });
+
+  const first = await page.evaluate((pageid) => {
+    const payload = JSON.parse(localStorage.getItem("big-scroll.engagement.v1"));
+    return payload.engagements.find(({ article }) => article.pageid === pageid);
+  }, firstPageId);
+  expect(first.viewMs).toBeGreaterThan(100);
+});
+
 test("long constrained session keeps images present and frame gaps bounded", async ({ page }) => {
   const wikipedia = await mockWikipedia(page, { latency: 180 });
   await addConstrainedCpuLoad(page);
