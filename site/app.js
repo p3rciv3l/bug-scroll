@@ -245,6 +245,7 @@ const observer = new IntersectionObserver((entries) => {
 async function loadMore(attempt = 0) {
   if (loading) return;
   loading = true;
+  let appended = false;
   if (feed.children.length === 0) setStatus("Finding articles…");
   try {
     const candidates = await fetchCandidates();
@@ -258,6 +259,7 @@ async function loadMore(attempt = 0) {
       observer.observe(element);
     }
     feed.append(fragment);
+    appended = true;
     if (!activeArticleId && feed.firstElementChild) {
       activeArticleId = feed.firstElementChild.dataset.pageid;
       hydrateNearbyImages();
@@ -270,6 +272,12 @@ async function loadMore(attempt = 0) {
     setTimeout(() => void loadMore(attempt + 1), delay);
   } finally {
     loading = false;
+    // Fill the bounded working set before the reader reaches it. This keeps
+    // network completion, ranking, and DOM insertion out of normal scrolling.
+    if (appended && feed.children.length < TARGET_FEED_CARDS) {
+      setTimeout(() => void loadMore(), 0);
+      return;
+    }
     // A very fast swipe can reach the end while the preceding request is still
     // completing. Recheck after releasing the lock so that gesture cannot stall.
     setTimeout(ensureFeedBuffer, 0);

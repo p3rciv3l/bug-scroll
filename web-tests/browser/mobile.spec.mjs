@@ -33,7 +33,7 @@ async function sampleOneCardScroll(page) {
 test("iPhone feed keeps only Likes UI and persists a like", async ({ page }) => {
   await mockWikipedia(page, { latency: 150 });
   await page.goto("/");
-  await expect(page.locator(".article")).toHaveCount(12);
+  await expect.poll(() => page.locator(".article").count()).toBeGreaterThanOrEqual(12);
 
   await expect(page.getByText("About", { exact: true })).toHaveCount(0);
   await expect(page.getByText("Language", { exact: true })).toHaveCount(0);
@@ -62,7 +62,7 @@ test("long constrained session keeps DOM, images, and frame gaps bounded", async
     localStorage.setItem("big-scroll.likes.v1", JSON.stringify({ version: 1, articles }));
   });
   await page.goto("/");
-  await expect(page.locator(".article")).toHaveCount(12);
+  await expect.poll(() => page.locator(".article").count()).toBeGreaterThanOrEqual(36);
   await expect(page.locator("#likes-count")).toHaveText("30");
 
   for (let batch = 0; batch < 18; batch += 1) {
